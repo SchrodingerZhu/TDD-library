@@ -6,14 +6,13 @@
 #include <iostream>
 #include <tuple>
 #include <string_view>
-#include <libunwind.h>
-#include <cxxabi.h>
 #include <cstring>
 #include <csignal>
 #include <thread>
 #include <csetjmp>
 #include <experimental/type_traits>
 #include <sstream>
+#include <string>
 
 namespace Color {
     enum Code {
@@ -44,7 +43,7 @@ namespace Color {
 struct unimplemented : std::exception {
     std::string _what;
 
-    explicit unimplemented(const char* func, const char * file, int line) {
+    explicit unimplemented(const char *func, const char *file, int line) {
         _what = "unimplemented ";
         _what.append(func);
         _what.append("\n   (");
@@ -72,13 +71,13 @@ struct unimplemented : std::exception {
     throw unimplemented(EVAL_FUNC, EVAL_FILE, EVAL_LINE);
 
 template<typename T>
-using displayable_inner = decltype( std::cout << std::declval<T&>() );
+using displayable_inner = decltype(std::cout << std::declval<T &>());
 
 template<typename T>
 constexpr bool displayable = std::experimental::is_detected_v<displayable_inner, T>;
 
-template <class A, class B>
-std::string construct_display(const A& a, const B& b, const char* x, const char* y, const char* file, int line) {
+template<class A, class B>
+std::string construct_display(const A &a, const B &b, const char *x, const char *y, const char *file, int line) {
     std::stringstream ss;
     ss << "expected ";
     if constexpr (displayable<A>) {
@@ -96,40 +95,54 @@ std::string construct_display(const A& a, const B& b, const char* x, const char*
 }
 
 
-
 namespace internal {
-    void backtrace() {
-        unw_cursor_t cursor;
-        unw_context_t context;
+#if __has_include(<execinfo.h>)
 
-        // Initialize cursor to current frame for local unwinding.
-        unw_getcontext(&context);
-        unw_init_local(&cursor, &context);
+#include <execinfo.h>  // for backtrace
+#include <dlfcn.h>     // for dladdr
+#include <cxxabi.h>    // for __cxa_demangle
 
-        // Unwind frames one by one, going up the frame stack.
-        while (unw_step(&cursor) > 0) {
-            unw_word_t offset, pc;
-            unw_get_reg(&cursor, UNW_REG_IP, &pc);
-            if (pc == 0) {
-                break;
-            }
-            std::printf("   0x%lx:", pc);
-            char sym[256];
-            if (unw_get_proc_name(&cursor, sym, sizeof(sym), &offset) == 0) {
-                char *nameptr = sym;
+    std::string _backtrace_impl(int skip = 1) {
+        void *callstack[128];
+        const int nMaxFrames = sizeof(callstack) / sizeof(callstack[0]);
+        char buf[1024];
+        int nFrames = backtrace(callstack, nMaxFrames);
+        char **symbols = backtrace_symbols(callstack, nFrames);
+
+        std::ostringstream trace_buf;
+        for (int i = skip; i < nFrames; i++) {
+            Dl_info info;
+            if (dladdr(callstack[i], &info)) {
+                char *demangled = NULL;
                 int status;
-                char *demangled = abi::__cxa_demangle(sym, nullptr, nullptr, &status);
-                if (status == 0) {
-                    nameptr = demangled;
-                }
-                std::printf(" (%s+0x%lx)\n", nameptr, offset);
-                std::free(demangled);
+                demangled = abi::__cxa_demangle(info.dli_sname, NULL, 0, &status);
+                snprintf(buf, sizeof(buf), " %-3d %0*p %s + %zd\n",
+                         i, 2 + sizeof(void *) * 2, callstack[i],
+                         status == 0 ? demangled : info.dli_sname,
+                         (char *) callstack[i] - (char *) info.dli_saddr);
+                free(demangled);
             } else {
-                std::printf(" -- error: unable to obtain symbol name for this frame\n");
+                snprintf(buf, sizeof(buf), "%-3d %*0p\n",
+                         i, 2 + sizeof(void *) * 2, callstack[i]);
             }
-        }
-    }
+            trace_buf << buf;
 
+            snprintf(buf, sizeof(buf), "     %s\n", symbols[i]);
+            trace_buf << buf;
+        }
+        free(symbols);
+        if (nFrames == nMaxFrames)
+            trace_buf << "[truncated]\n";
+        return trace_buf.str();
+    }
+    void backtrace() {
+        std::cout << _backtrace_impl();
+    }
+#else
+    void backtrace() {
+        std::cout << "   backtrace is not supported in this runtime" << std::endl;
+    }
+#endif
     std::jmp_buf jmp_buffer;
 
     extern "C" void register_func(int value) {
