@@ -214,7 +214,9 @@ namespace internal {
 
     extern "C" void error_handler(int value) {
         asm(".cfi_signal_frame");
+#if __has_include(<execinfo.h>)
         last_size = ::backtrace(last_frames, sizeof last_frames / sizeof(void *));
+#elif
         switch (value) {
             case SIGFPE:
                 WARN(std::runtime_error("arithmetic error"));
