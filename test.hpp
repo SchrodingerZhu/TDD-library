@@ -210,18 +210,23 @@ namespace internal {
         std::cout << "   backtrace is not supported in this runtime" << std::endl;
     }
 #endif
-    std::jmp_buf jmp_buffer;
+    thread_local std::jmp_buf jmp_buffer;
 
     extern "C" void error_handler(int value) {
         asm(".cfi_signal_frame");
+        last_size = ::backtrace(last_frames, sizeof last_frames / sizeof(void *));
         switch (value) {
             case SIGFPE:
-                throw std::runtime_error("arithmetic error");
+                WARN(std::runtime_error("arithmetic error"));
+                break;
             case SIGSEGV:
-                throw std::runtime_error("segment fault");
+                WARN(std::runtime_error("segment fault"));
+                break;
             default:
-                throw std::runtime_error("unknown error");
+                WARN(std::runtime_error("unknown error"));
+                break;
         }
+        std::longjmp(jmp_buffer, value);
     }
 
     void init() {
@@ -253,17 +258,19 @@ struct Test {
             try {
                 std::thread handle {
                         [&]{
-                            try {
-                                std::get<0>(i)();
-                            }
-                            catch (unimplemented& exp) {
-                                thread_error = std::make_unique<unimplemented>(exp);
-                            }
-                            catch (std::runtime_error& exp) {
-                                thread_error = std::make_unique<std::runtime_error>(exp);
-                            }
-                            catch (std::exception& exp) {
-                                thread_error = std::make_unique<std::exception>(exp);
+                            if (setjmp(internal::jmp_buffer) == 0) {
+                                try {
+                                    std::get<0>(i)();
+                                }
+                                catch (unimplemented &exp) {
+                                    thread_error = std::make_unique<unimplemented>(exp);
+                                }
+                                catch (std::runtime_error &exp) {
+                                    thread_error = std::make_unique<std::runtime_error>(exp);
+                                }
+                                catch (std::exception &exp) {
+                                    thread_error = std::make_unique<std::exception>(exp);
+                                }
                             }
                         }
                 };
