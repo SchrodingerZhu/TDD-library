@@ -1,5 +1,5 @@
-#include "test.hpp"
-#include "solution.hpp"
+#include <test.hpp>
+#include <solution.hpp>
 #include <random>
 
 #define TEST_SIZE 1000
