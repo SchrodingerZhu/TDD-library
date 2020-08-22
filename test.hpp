@@ -40,9 +40,11 @@ namespace Color {
         friend std::ostream &
         operator<<(std::ostream &os, const Modifier &mod) {
 #ifdef _WIN32
-            if (_isatty(STDOUT_FILENO) == 64)
+            if (_isatty(STDOUT_FILENO) == 64) {
                 return os;
-            else
+            } else {
+                return os << "\033[" << mod.code << "m";
+            }
 #else
             return os << "\033[" << mod.code << "m";
 #endif
