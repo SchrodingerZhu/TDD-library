@@ -1,4 +1,5 @@
 CONFIG += debug c++17 sanitizer sanitize_address
+QMAKE_CXXFLAGS_WARN_ON = -Wall -Wextra -Werror
 
 HEADERS += tests/test.hpp \
     student/solution.hpp
