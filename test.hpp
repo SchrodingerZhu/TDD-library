@@ -13,9 +13,12 @@
 #include <experimental/type_traits>
 #include <sstream>
 #include <string>
+
 #ifndef _WIN32
+
 #include <stdio.h>
 #include <zconf.h>
+
 #endif
 
 namespace Color {
@@ -52,6 +55,23 @@ namespace Color {
     };
 }
 
+struct warnings : std::exception {
+    std::vector<std::string> msgs;
+    std::string final;
+
+    template<class T>
+    explicit warnings(T &&msgs) : msgs(std::forward<T>(msgs)) {}
+
+    const char *what() {
+        std::stringstream ss;
+        for (auto &i : msgs) {
+            ss << "   " << i << std::endl;
+        }
+        final = ss.str();
+        return final.c_str();
+    }
+};
+
 struct unimplemented : std::exception {
     std::string _what;
 
@@ -79,9 +99,14 @@ struct unimplemented : std::exception {
 
 #define EXPECT_EQ(X, Y) \
     if (!((X) == (Y))) throw std::runtime_error(construct_display((X), (Y), #X, #Y, EVAL_FILE, EVAL_LINE));
+#define _UNIMPLEMENTED \
+    unimplemented(EVAL_FUNC, EVAL_FILE, EVAL_LINE)
 #define UNIMPLEMENTED \
-    throw unimplemented(EVAL_FUNC, EVAL_FILE, EVAL_LINE);
-
+    throw _UNIMPLEMENTED;
+#define WARN(msg) \
+    internal::warn((msg));
+#define WARN_UNIMPLEMENTED \
+    WARN(_UNIMPLEMENTED);
 template<typename T>
 using displayable_inner = decltype(std::cout << std::declval<T &>());
 
@@ -107,35 +132,62 @@ std::string construct_display(const A &a, const B &b, const char *x, const char 
 }
 
 
-namespace internal {
-#if __has_include(<execinfo.h>)
-
+#ifndef _WIN32
 #include <execinfo.h>  // for backtrace
 #include <dlfcn.h>     // for dladdr
 #include <cxxabi.h>    // for __cxa_demangle
+namespace {
+    void *last_frames[20];
+    size_t last_size;
+    std::string exception_name;
 
+    std::string demangle(const char *name) {
+        int status;
+        std::unique_ptr<char, void (*)(void *)> realname(abi::__cxa_demangle(name, 0, 0, &status), &std::free);
+        return status ? "failed" : &*realname;
+    }
+}
+
+extern "C" {
+void __cxa_throw(void* ex, void* info, void (_GLIBCXX_CDTOR_CALLABI * dest) (void *)) {
+    exception_name = demangle(reinterpret_cast<const std::type_info *>(info)->name());
+    last_size = backtrace(last_frames, sizeof last_frames / sizeof(void *));
+
+    static void (*const rethrow)(void *, void *, void(*)(void *)) __attribute__ ((noreturn)) = (void (*)(void *, void *,
+                                                                                                         void(*)(void *))) dlsym(
+            RTLD_NEXT, "__cxa_throw");
+    rethrow(ex, info, dest);
+}
+}
+#endif
+
+namespace internal {
+    std::vector<std::string> warnings;
+
+    template<class T>
+    void warn(T &&except) {
+        warnings.emplace_back(except.what());
+    }
+#if __has_include(<execinfo.h>)
     std::string _backtrace_impl(int skip = 1) {
-        void *callstack[128];
-        const int nMaxFrames = sizeof(callstack) / sizeof(callstack[0]);
+        const int nMaxFrames = sizeof last_frames / sizeof(void *);
         char buf[1024];
-        int nFrames = backtrace(callstack, nMaxFrames);
-        char **symbols = backtrace_symbols(callstack, nFrames);
-
+        char **symbols = backtrace_symbols(last_frames, last_size);
         std::ostringstream trace_buf;
-        for (int i = skip; i < nFrames; i++) {
+        for (size_t i = skip; i < last_size; i++) {
             Dl_info info;
-            if (dladdr(callstack[i], &info)) {
+            if (dladdr(last_frames[i], &info)) {
                 char *demangled = NULL;
                 int status;
                 demangled = abi::__cxa_demangle(info.dli_sname, NULL, 0, &status);
-                snprintf(buf, sizeof(buf), " %-3d %0*p %s + %zd\n",
-                         i, 2 + sizeof(void *) * 2, callstack[i],
+                snprintf(buf, sizeof(buf), " %-3zu %*p %s + %zd\n",
+                         i, int(2 + sizeof(void *) * 2), last_frames[i],
                          status == 0 ? demangled : info.dli_sname,
-                         (char *) callstack[i] - (char *) info.dli_saddr);
+                         (char *) last_frames[i] - (char *) info.dli_saddr);
                 free(demangled);
             } else {
-                snprintf(buf, sizeof(buf), "%-3d %*0p\n",
-                         i, 2 + sizeof(void *) * 2, callstack[i]);
+                snprintf(buf, sizeof(buf), "%-3zu %*p\n",
+                         i, int(2 + sizeof(void *) * 2), last_frames[i]);
             }
             trace_buf << buf;
 
@@ -143,13 +195,15 @@ namespace internal {
             trace_buf << buf;
         }
         free(symbols);
-        if (nFrames == nMaxFrames)
+        if (last_size == nMaxFrames)
             trace_buf << "[truncated]\n";
         return trace_buf.str();
     }
+
     void backtrace() {
         std::cout << _backtrace_impl();
     }
+
 #else
     void backtrace() {
         std::cout << "   backtrace is not supported in this runtime" << std::endl;
@@ -185,6 +239,7 @@ struct Test {
         for (auto &i : registry) {
             std::cout << Color::Modifier(Color::FG_BLUE) << "testing <" << std::get<2>(i) << ">: ";
             std::memset(&internal::jmp_buffer, 0, sizeof(internal::jmp_buffer));
+            internal::warnings.clear();
             try {
                 int val;
                 val = setjmp(internal::jmp_buffer);
@@ -200,6 +255,10 @@ struct Test {
                             throw std::runtime_error("unknown error");
                     }
                 }
+                if (!internal::warnings.empty()) {
+                    throw warnings(internal::warnings);
+
+                }
                 current += std::get<1>(i);;
                 std::cout << Color::Modifier(Color::FG_GREEN) << "[SUCCESS]"
                           << Color::Modifier(Color::FG_DEFAULT) << std::endl;
@@ -207,6 +266,9 @@ struct Test {
                 std::cout << Color::Modifier(Color::FG_RED) << "[FAILURE]"
                           << Color::Modifier(Color::FG_CYAN) << "\n - message: \n   "
                           << Color::Modifier(Color::FG_DEFAULT) << exp.what() << std::endl;
+                if (!internal::warnings.empty()) {
+                    std::cout << warnings(internal::warnings).what() << std::endl;
+                }
                 std::cout << Color::Modifier(Color::FG_CYAN) << " - backtrace: "
                           << Color::Modifier(Color::FG_DEFAULT) << std::endl;
                 internal::backtrace();

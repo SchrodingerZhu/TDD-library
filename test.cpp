@@ -46,7 +46,7 @@ size_t EvilStruct::ctor_call = 0;
 int main() {
     Test test;
     test.add(10, "test", [] {
-        int a = 12;
+        int a = 346;
         int b = 346;
         EXPECT_EQ(a, b);
     });

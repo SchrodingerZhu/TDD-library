@@ -30,14 +30,14 @@ public:
         /*
          * Implement a move constructor
          */
-        UNIMPLEMENTED
+        WARN_UNIMPLEMENTED
     }
 
     ~Vector() {
         /*
          * Implement a destructor.
          */
-        UNIMPLEMENTED
+        WARN_UNIMPLEMENTED
     }
     void push_back(const T&) {
         /*
