@@ -263,6 +263,7 @@ struct Test {
                             if (setjmp(internal::jmp_buffer) == 0) {
                                 try {
                                     std::get<0>(i)();
+                                    internal::init();
                                 }
                                 catch (unimplemented &exp) {
                                     thread_error = std::make_unique<unimplemented>(exp);
@@ -278,7 +279,6 @@ struct Test {
                 };
                 handle.join();
                 if (thread_error) {
-                    internal::warnings.clear();
                     std::cout << Color::Modifier(Color::FG_RED) << "[FAILURE]"
                               << Color::Modifier(Color::FG_CYAN) << "\n - message: \n   "
                               << Color::Modifier(Color::FG_DEFAULT) << thread_error->what() << std::endl;
@@ -289,7 +289,6 @@ struct Test {
                 }
                 if (!internal::warnings.empty()) {
                     auto exp = warnings(internal::warnings);
-                    internal::warnings.clear();
                     std::cout << Color::Modifier(Color::FG_RED) << "[FAILURE]"
                               << Color::Modifier(Color::FG_CYAN) << "\n - message: \n   "
                               << Color::Modifier(Color::FG_DEFAULT) << exp.what() << std::endl;
