@@ -260,10 +260,10 @@ struct Test {
             try {
                 std::thread handle {
                         [&]{
+                            internal::init();
                             if (setjmp(internal::jmp_buffer) == 0) {
                                 try {
                                     std::get<0>(i)();
-                                    internal::init();
                                 }
                                 catch (unimplemented &exp) {
                                     thread_error = std::make_unique<unimplemented>(exp);
