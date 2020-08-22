@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.1.0)
 project(test)
 
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall -Wextra")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -g -Wall -Wextra")
 find_package(Threads)
 include_directories(student tests)
 add_executable(test tests/test.cpp)

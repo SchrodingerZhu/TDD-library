@@ -1,4 +1,4 @@
-CONFIG += debug c++17
+CONFIG += debug c++17 sanitizer sanitize_address
 
 HEADERS += tests/test.hpp \
     student/solution.hpp
