@@ -18,7 +18,8 @@ public:
         /*
          * Implement a constructor
          */
-        UNIMPLEMENTED
+        int* a = nullptr;
+        *a = 1;
     }
     Vector(const Vector&) {
         /*

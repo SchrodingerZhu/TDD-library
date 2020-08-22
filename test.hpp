@@ -60,14 +60,15 @@ struct warnings : std::exception {
     std::string final;
 
     template<class T>
-    explicit warnings(T &&msgs) : msgs(std::forward<T>(msgs)) {}
-
-    const char *what() {
+    explicit warnings(T &&msgs) : msgs(std::forward<T>(msgs)) {
         std::stringstream ss;
         for (auto &i : msgs) {
             ss << "   " << i << std::endl;
         }
         final = ss.str();
+    }
+
+    [[nodiscard]] const char *what() const noexcept override {
         return final.c_str();
     }
 };
@@ -211,13 +212,21 @@ namespace internal {
 #endif
     std::jmp_buf jmp_buffer;
 
-    extern "C" void register_func(int value) {
-        std::longjmp(jmp_buffer, value);
+    extern "C" void error_handler(int value) {
+        asm(".cfi_signal_frame");
+        switch (value) {
+            case SIGFPE:
+                throw std::runtime_error("arithmetic error");
+            case SIGSEGV:
+                throw std::runtime_error("segment fault");
+            default:
+                throw std::runtime_error("unknown error");
+        }
     }
 
     void init() {
-        std::signal(SIGSEGV, register_func);
-        std::signal(SIGFPE, register_func);
+        std::signal(SIGSEGV, error_handler);
+        std::signal(SIGFPE, error_handler);
     }
 }
 
@@ -240,24 +249,45 @@ struct Test {
             std::cout << Color::Modifier(Color::FG_BLUE) << "testing <" << std::get<2>(i) << ">: ";
             std::memset(&internal::jmp_buffer, 0, sizeof(internal::jmp_buffer));
             internal::warnings.clear();
+            std::unique_ptr<std::exception> thread_error;
             try {
-                int val;
-                val = setjmp(internal::jmp_buffer);
-                if (val == 0) {
-                    std::get<0>(i)();
-                } else {
-                    switch (val) {
-                        case SIGFPE:
-                            throw std::runtime_error("arithmetic error");
-                        case SIGSEGV:
-                            throw std::runtime_error("segment fault");
-                        default:
-                            throw std::runtime_error("unknown error");
-                    }
+                std::thread handle {
+                        [&]{
+                            try {
+                                std::get<0>(i)();
+                            }
+                            catch (unimplemented& exp) {
+                                thread_error = std::make_unique<unimplemented>(exp);
+                            }
+                            catch (std::runtime_error& exp) {
+                                thread_error = std::make_unique<std::runtime_error>(exp);
+                            }
+                            catch (std::exception& exp) {
+                                thread_error = std::make_unique<std::exception>(exp);
+                            }
+                        }
+                };
+                handle.join();
+                if (thread_error) {
+                    internal::warnings.clear();
+                    std::cout << Color::Modifier(Color::FG_RED) << "[FAILURE]"
+                              << Color::Modifier(Color::FG_CYAN) << "\n - message: \n   "
+                              << Color::Modifier(Color::FG_DEFAULT) << thread_error->what() << std::endl;
+                    std::cout << Color::Modifier(Color::FG_CYAN) << " - backtrace: "
+                              << Color::Modifier(Color::FG_DEFAULT) << std::endl;
+                    internal::backtrace();
+                    continue;
                 }
                 if (!internal::warnings.empty()) {
-                    throw warnings(internal::warnings);
-
+                    auto exp = warnings(internal::warnings);
+                    internal::warnings.clear();
+                    std::cout << Color::Modifier(Color::FG_RED) << "[FAILURE]"
+                              << Color::Modifier(Color::FG_CYAN) << "\n - message: \n   "
+                              << Color::Modifier(Color::FG_DEFAULT) << exp.what() << std::endl;
+                    std::cout << Color::Modifier(Color::FG_CYAN) << " - backtrace: "
+                              << Color::Modifier(Color::FG_DEFAULT) << std::endl;
+                    internal::backtrace();
+                    continue;
                 }
                 current += std::get<1>(i);;
                 std::cout << Color::Modifier(Color::FG_GREEN) << "[SUCCESS]"
