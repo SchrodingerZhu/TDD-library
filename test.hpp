@@ -13,9 +13,9 @@
 #include <experimental/type_traits>
 #include <sstream>
 #include <string>
-#ifdef _WIN32
-#include <io.h>
-#include <cstdio>
+#ifndef _WIN32
+#include <stdio.h>
+#include <zconf.h>
 #endif
 
 namespace Color {
@@ -39,14 +39,14 @@ namespace Color {
 
         friend std::ostream &
         operator<<(std::ostream &os, const Modifier &mod) {
-#ifdef _WIN32
-            if (_isatty(STDOUT_FILENO) == 64) {
-                return os;
-            } else {
-                return os << "\033[" << mod.code << "m";
-            }
+#ifdef _WIN32 // It is hard to check windows ANSI environment
+            return os;
 #else
-            return os << "\033[" << mod.code << "m";
+            if (isatty(STDOUT_FILENO))
+                return os << "\033[" << mod.code << "m";
+            else {
+                return os;
+            }
 #endif
         }
     };
